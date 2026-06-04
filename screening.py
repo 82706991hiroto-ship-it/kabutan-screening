@@ -25,56 +25,49 @@ def get_session():
     session = requests.Session()
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
     })
     return session
 
 def main():
     now = datetime.now(JST).strftime('%Y/%m/%d')
     session = get_session()
-    results = []
 
-    # トップページでCookie取得
-    r0 = session.get('https://kabutan.jp/', timeout=20)
-    results.append(f'トップページ: HTTP {r0.status_code}')
+    session.get('https://kabutan.jp/', timeout=20)
     time.sleep(2)
 
-    # 試すURLリスト
-    urls = [
-        'https://kabutan.jp/warning/?mode=52high',
-        'https://kabutan.jp/warning/index.html?mode=52high',
-        'https://kabutan.jp/warning/?mode=52high&page=1',
-        'https://kabutan.jp/stock/warning/?mode=52high',
-    ]
+    session.headers['Referer'] = 'https://kabutan.jp/'
+    res = session.get('https://kabutan.jp/warning/?mode=52high', timeout=20)
 
-    for url in urls:
-        session.headers['Referer'] = 'https://kabutan.jp/'
-        r = session.get(url, timeout=20)
-        results.append(f'URL: {url}\n→ HTTP {r.status_code} / {len(r.text)}文字')
+    soup = BeautifulSoup(res.text, 'lxml')
 
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'lxml')
-            links = soup.find_all('a', href=re.compile(r'code=\d{4}'))
-            results.append(f'→ 銘柄リンク数: {len(links)}件')
-            if links:
-                samples = []
-                for l in links[:5]:
-                    m = re.search(r'code=(\d{4})', l['href'])
-                    if m:
-                        samples.append(f'{m.group(1)}: {l.get_text(strip=True)}')
-                results.append('サンプル:\n' + '\n'.join(samples))
-            break
-        time.sleep(2)
+    # 全リンクのhrefパターンを収集
+    all_hrefs = set()
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if re.search(r'\d{4}', href):
+            all_hrefs.add(href)
 
-    send_discord('🔍 **デバッグ結果** ({})\n\n{}'.format(now, '\n'.join(results)))
+    href_list = sorted(all_hrefs)[:30]
+    send_discord(f'🔍 **4桁数字を含むリンク一覧**:\n' + '\n'.join(href_list))
+
+    # テーブルの内容を確認
+    tables = soup.find_all('table')
+    send_discord(f'テーブル数: {len(tables)}')
+    for i, table in enumerate(tables[:5]):
+        rows = table.find_all('tr')
+        # 最初の3行を表示
+        preview = []
+        for row in rows[:3]:
+            cells = [td.get_text(strip=True) for td in row.find_all(['td','th'])]
+            if cells:
+                preview.append(' | '.join(cells[:6]))
+        if preview:
+            send_discord(f'テーブル[{i}] ({len(rows)}行):\n```\n' + '\n'.join(preview) + '\n```')
 
 if __name__ == '__main__':
     main()
