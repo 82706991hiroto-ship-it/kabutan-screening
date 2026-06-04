@@ -72,7 +72,6 @@ def find_52week_highs(stocks):
             if data.empty:
                 continue
 
-            # High列を取得
             if isinstance(data.columns, pd.MultiIndex):
                 high = data['High']
             else:
@@ -86,7 +85,7 @@ def find_52week_highs(stocks):
                     continue
                 today_high = series.iloc[-1]
                 prev_high  = series.iloc[:-1].max()
-                if today_high >= prev_high:  # 52週高値更新
+                if today_high >= prev_high:
                     results.append(ticker_map[ticker])
         except Exception as e:
             print(f"バッチエラー: {e}")
@@ -94,28 +93,51 @@ def find_52week_highs(stocks):
 
     return results
 
+def _calc_yoy(stmt, profit=False):
+    """四半期データで前年同期比を計算"""
+    keys = ['Operating Income', 'EBIT'] if profit else ['Total Revenue', 'Operating Revenue']
+    for key in keys:
+        if key in stmt.index:
+            series = stmt.loc[key].dropna()
+            if len(series) >= 5:
+                latest, year_ago = series.iloc[0], series.iloc[4]
+                if year_ago > 0:
+                    return (latest - year_ago) / year_ago * 100
+    return None
+
+def _calc_yoy_annual(stmt, profit=False):
+    """年次データで前年比を計算"""
+    keys = ['Operating Income', 'EBIT'] if profit else ['Total Revenue', 'Operating Revenue']
+    for key in keys:
+        if key in stmt.index:
+            series = stmt.loc[key].dropna()
+            if len(series) >= 2:
+                latest, prev = series.iloc[0], series.iloc[1]
+                if prev > 0:
+                    return (latest - prev) / prev * 100
+    return None
+
 def get_financials(code):
-    """yfinanceで直近四半期の売上高・営業利益の前年同期比(%)を取得"""
+    """yfinanceで売上高・営業利益の前年比(%)を取得（四半期→年次の順で試す）"""
     try:
         ticker = yf.Ticker(code + '.T')
+
+        # まず四半期データを試す
         q = ticker.quarterly_income_stmt
-        if q is None or q.empty or q.shape[1] < 5:
-            return None, None
+        if q is not None and not q.empty and q.shape[1] >= 5:
+            sg = _calc_yoy(q, profit=False)
+            pg = _calc_yoy(q, profit=True)
+            if sg is not None and pg is not None:
+                return sg, pg
 
-        def yoy(row_keys):
-            for key in row_keys:
-                if key in q.index:
-                    series = q.loc[key].dropna()
-                    if len(series) >= 5:
-                        latest   = series.iloc[0]
-                        year_ago = series.iloc[4]
-                        if year_ago > 0:
-                            return (latest - year_ago) / year_ago * 100
-            return None
+        # 四半期がダメなら年次データにフォールバック
+        a = ticker.income_stmt
+        if a is not None and not a.empty and a.shape[1] >= 2:
+            sg = _calc_yoy_annual(a, profit=False)
+            pg = _calc_yoy_annual(a, profit=True)
+            return sg, pg
 
-        sg = yoy(['Total Revenue', 'Operating Revenue'])
-        pg = yoy(['Operating Income', 'EBIT'])
-        return sg, pg
+        return None, None
     except:
         return None, None
 
@@ -140,15 +162,20 @@ def main():
         # Step3: 決算チェック
         print(f"決算確認中（{len(high_stocks)}銘柄）...")
         qualifying = []
+        none_count = 0
+
         for i, s in enumerate(high_stocks):
             sg, pg = get_financials(s['code'])
-            label = f"+{sg:.1f}% / +{pg:.1f}%" if sg and pg else "データなし"
-            print(f"[{i+1}/{len(high_stocks)}] {s['code']} {s['name']} {label}")
+            if sg is None or pg is None:
+                none_count += 1
+            print(f"[{i+1}/{len(high_stocks)}] {s['code']} {s['name']} 売上:{sg} 営業利益:{pg}")
             if sg is not None and pg is not None and sg >= 10 and pg >= 20:
                 s['sales_growth']  = sg
                 s['profit_growth'] = pg
                 qualifying.append(s)
             time.sleep(0.3)
+
+        print(f"財務データなし: {none_count}/{len(high_stocks)}銘柄")
 
         # Step4: Discord通知
         if qualifying:
@@ -169,7 +196,7 @@ def main():
             send_discord(
                 f'📊 **本日の52週高値×好決算スクリーニング結果** ({now})\n\n'
                 f'条件を満たす銘柄がありませんでした。\n'
-                f'（52週高値更新: {len(high_stocks)}銘柄 → 売上+10%・営業利益+20%以上: 0銘柄）'
+                f'（52週高値更新: {len(high_stocks)}銘柄　財務データあり: {len(high_stocks)-none_count}銘柄　条件合致: 0銘柄）'
             )
 
     except Exception as e:
