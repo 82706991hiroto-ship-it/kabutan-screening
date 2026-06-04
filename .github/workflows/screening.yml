@@ -2,8 +2,8 @@ name: 株探 52週高値×好決算スクリーニング
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'  # 平日16:00 JST
-  workflow_dispatch:  # GitHub画面から手動実行も可能
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   screening:
@@ -17,7 +17,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml
+        run: |
+          pip install playwright beautifulsoup4 lxml requests
+          playwright install --with-deps chromium
 
       - name: Run screening
         env:
