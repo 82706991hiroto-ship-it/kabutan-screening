@@ -8,6 +8,7 @@ on:
 jobs:
   screening:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -17,9 +18,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install playwright beautifulsoup4 lxml requests
-          playwright install --with-deps chromium
+        run: pip install yfinance pandas requests openpyxl
 
       - name: Run screening
         env:
