@@ -1,0 +1,25 @@
+name: 株探 52週高値×好決算スクリーニング
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'  # 平日16:00 JST
+  workflow_dispatch:  # GitHub画面から手動実行も可能
+
+jobs:
+  screening:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml
+
+      - name: Run screening
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python screening.py
